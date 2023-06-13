@@ -25,7 +25,7 @@ $ cat samples/sample1.yaml
 cmd:
   - mongosh
   - --eval
-  - 'show dbs'
+  - show dbs
   - mongodb://localhost:27017
 
 $ curl --data-binary @./samples/sample1.yaml localhost:8080/exec
