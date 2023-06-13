@@ -1,0 +1,5 @@
+cmd:
+  - mongosh
+  - --eval
+  - show dbs
+  - mongodb://localhost:27017
