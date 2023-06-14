@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
@@ -76,85 +77,9 @@ func listenAndServe(s *http.Server, addr string) {
 	log.Printf("listening on port %s: %v", addr, err)
 }
 
-/*
-// httpJSON replies to the request with the specified error message and HTTP code.
-// It does not otherwise end the request; the caller should ensure no further
-// writes are done to w.
-// The error message should be JSON.
-func httpJSON(w http.ResponseWriter, error string, code int) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(code)
-	fmt.Fprintln(w, error)
-}
-
-func toJSON(v interface{}) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		log.Printf("toJSON: %v", err)
-	}
-	return string(b)
-}
-*/
-
 type requestBody struct {
 	Cmd []string `json:"cmd" yaml:"cmd"`
 }
-
-/*
-func response(app *config, w http.ResponseWriter, r *http.Request, status int, message string) {
-	const me = "response"
-
-	hostname, errHost := os.Hostname()
-	if errHost != nil {
-		log.Printf("%s hostname error: %v", me, errHost)
-	}
-
-	// take a copy of the body
-	reqBody, errRead := io.ReadAll(r.Body)
-	if errRead != nil {
-		log.Printf("%s: body read error: %v", me, errRead)
-	}
-	r.Body = io.NopCloser(bytes.NewBuffer(reqBody)) // restore it
-
-	errForm := r.ParseForm()
-	if errForm != nil {
-		log.Printf("%s: form error: %v", me, errForm)
-	}
-
-	errMultipart := r.ParseMultipartForm(32 << 20)
-	if errMultipart != nil {
-		log.Printf("%s: form multipart error: %v", me, errMultipart)
-	}
-
-	params := map[string]string{}
-
-	for _, p := range app.paramList {
-		params[p] = r.FormValue(p)
-	}
-
-	reply := responseBody{
-		Request: responseRequest{
-			Headers:   r.Header,
-			Method:    r.Method,
-			URI:       r.RequestURI,
-			Host:      r.Host,
-			Body:      string(reqBody),
-			FormQuery: r.Form,
-			FormPost:  r.PostForm,
-			Params:    params,
-		},
-		Message:        message,
-		Status:         status,
-		ServerHostname: hostname,
-		ServerVersion:  version,
-	}
-
-	body := toJSON(reply)
-
-	httpJSON(w, body, status)
-}
-*/
 
 func handlerRoot(app *config, w http.ResponseWriter, r *http.Request) {
 	const me = "handlerRoot"
@@ -201,13 +126,25 @@ func handlerPath(app *config, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var exitStatus int
+	var errExecMsg string
+
 	cmd := exec.Command(reqBody.Cmd[0], reqBody.Cmd[1:]...)
 	stdoutStderr, errExec := cmd.CombinedOutput()
 	if errExec != nil {
-		msg := fmt.Sprintf("%s: exec error: %v", me, errExec)
-		log.Print(msg)
-		http.Error(w, msg, 500)
-		return
+
+		if exitError, isExitError := errExec.(*exec.ExitError); isExitError {
+			exitStatus = exitError.Sys().(syscall.WaitStatus).ExitStatus()
+		}
+
+		errExecMsg = fmt.Sprintf("%s: exec error: exit_status=%d: %v", me, exitStatus, errExec)
+		log.Print(errExecMsg)
+
+		if exitStatus == 0 {
+			// error is other than bad exit status
+			http.Error(w, errExecMsg, 500)
+			return
+		}
 	}
 
 	output := string(stdoutStderr)
@@ -215,6 +152,11 @@ func handlerPath(app *config, w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s: output: %s", me, output)
 
 	fmt.Fprintln(w, output)
+
+	if exitStatus != 0 {
+		// show bad exit status
+		fmt.Fprintln(w, errExecMsg)
+	}
 }
 
 // envString extracts string from env var.
