@@ -126,12 +126,13 @@ func handlerPath(app *config, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exitStatus int
 	var errExecMsg string
 
 	cmd := exec.Command(reqBody.Cmd[0], reqBody.Cmd[1:]...)
 	stdoutStderr, errExec := cmd.CombinedOutput()
 	if errExec != nil {
+
+		var exitStatus int
 
 		if exitError, isExitError := errExec.(*exec.ExitError); isExitError {
 			exitStatus = exitError.Sys().(syscall.WaitStatus).ExitStatus()
@@ -139,12 +140,6 @@ func handlerPath(app *config, w http.ResponseWriter, r *http.Request) {
 
 		errExecMsg = fmt.Sprintf("%s: exec error: exit_status=%d: %v", me, exitStatus, errExec)
 		log.Print(errExecMsg)
-
-		if exitStatus == 0 {
-			// error is other than bad exit status
-			http.Error(w, errExecMsg, 500)
-			return
-		}
 	}
 
 	output := string(stdoutStderr)
@@ -153,8 +148,8 @@ func handlerPath(app *config, w http.ResponseWriter, r *http.Request) {
 
 	fmt.Fprintln(w, output)
 
-	if exitStatus != 0 {
-		// show bad exit status
+	if errExec != nil {
+		// show error
 		fmt.Fprintln(w, errExecMsg)
 	}
 }
